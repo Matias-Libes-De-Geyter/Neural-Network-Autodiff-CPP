@@ -1,0 +1,12 @@
+all: compile link
+
+CXXFLAGS = -Iinclude -Iinclude/src
+
+SOURCES = $(wildcard *.cpp) \
+	  $(wildcard include/src/*.cpp)
+
+compile:
+	g++ $(CXXFLAGS) -c $(SOURCES) -march=native -ffast-math
+
+link:
+	g++ *.o -o main
