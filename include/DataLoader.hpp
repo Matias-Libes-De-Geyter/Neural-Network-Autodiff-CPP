@@ -13,7 +13,7 @@ inline int reverseInt(int i) { // to little-endian
 	c4 = (i >> 24) & 255;
 	return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
 }
-inline std::vector<int> readMNIST(const std::string& imageFile, const std::string& labelFile, std::vector<double>& images, std::vector<double>& labels) {
+inline std::vector<int> readMNIST(const std::string& imageFile, const std::string& labelFile, std::vector<Scalar>& images, std::vector<Scalar>& labels) {
 	std::ifstream imgFile(imageFile, std::ios::binary);
 	std::ifstream lblFile(labelFile, std::ios::binary);
 
@@ -34,18 +34,18 @@ inline std::vector<int> readMNIST(const std::string& imageFile, const std::strin
 	numLabels = reverseInt(numLabels);
 
 	int C = std::min(numImages, numLabels);
-	images = std::vector<double>(C * numRows * numCols);
-	labels = std::vector<double>(1 * C);
+	images = std::vector<Scalar>(C * numRows * numCols);
+	labels = std::vector<Scalar>(1 * C);
 
 	for (int i = 0; i < C; ++i) {
 		for (int j = 0; j < numRows * numCols; ++j) {
 			unsigned char pixel;
 			imgFile.read(reinterpret_cast<char*>(&pixel), sizeof(pixel));
-			images[i * numRows * numCols + j] = static_cast<double>(pixel) / 255.0;
+			images[i * numRows * numCols + j] = static_cast<Scalar>(pixel) / 255.0;
 		}
 		unsigned char label;
 		lblFile.read(reinterpret_cast<char*>(&label), sizeof(label));
-		labels[i] = static_cast<double>(label);
+		labels[i] = static_cast<Scalar>(label);
 	}
 
 	return { numRows, numCols, C };
@@ -59,8 +59,8 @@ struct Dataset {
 };
 inline Dataset DataLoader(const int& batch_number, const int& batch_size, const std::string& dataset_type) {
 
-	std::vector<double> images;
-	std::vector<double> labels;
+	std::vector<Scalar> images;
+	std::vector<Scalar> labels;
 	std::string ImagesFile;
 	std::string LabelsFile;
 	if (dataset_type == "train") {
@@ -84,8 +84,8 @@ inline Dataset DataLoader(const int& batch_number, const int& batch_size, const 
 	data.y.reserve(batch_number);
 
 	for (int n = 0; n < batch_number; n++) {
-		std::vector<double> batch_x(&images[batch_size * nrows * ncols * n], &images[batch_size * nrows * ncols * (n + 1)]);
-		std::vector<double> batch_y(&labels[batch_size * n], &labels[batch_size * (n + 1)]);
+		std::vector<Scalar> batch_x(&images[batch_size * nrows * ncols * n], &images[batch_size * nrows * ncols * (n + 1)]);
+		std::vector<Scalar> batch_y(&labels[batch_size * n], &labels[batch_size * (n + 1)]);
 		
 		TensorPtr X = std::make_shared<Tensor>(batch_size, nrows * ncols, batch_x, "IMG", false);
 		TensorPtr Y = std::make_shared<Tensor>(batch_size, 1, batch_y, "LBL", false);

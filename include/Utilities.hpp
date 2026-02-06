@@ -9,7 +9,7 @@
 inline void print(Tensor& A) {
 	const size_t rows = A.rows();
 	const size_t cols = A.cols();
-	const double* data = A.data();
+	const Scalar* data = A.data();
 
 	std::ostringstream stream;
 	stream << "[";
@@ -36,7 +36,7 @@ inline void print(const std::string& text, Tensor& A) {
 inline void printgrad(Tensor& A) {
 	const size_t rows = A.rows();
 	const size_t cols = A.cols();
-	const double* grad = A.gradient();
+	const Scalar* grad = A.gradient();
 
 	std::ostringstream stream;
 	stream << "[";

@@ -3,7 +3,7 @@
 class Optimizer {
 public:
 	virtual void zero_grad() {};
-	virtual void step(const double& lr) {};
+	virtual void step(const Scalar& lr) {};
 };
 
 class SGD : public Optimizer {
@@ -17,11 +17,11 @@ public:
 			parameter->zero_grad();
 	};
 
-	inline void step(const double& lr) override {
+	inline void step(const Scalar& lr) override {
 		for (TensorPtr parameter : parameters_) {
 			if (parameter->requires_grad()) {
-				double* params_data = parameter->data();
-				double* params_grad = parameter->gradient();
+				Scalar* params_data = parameter->data();
+				Scalar* params_grad = parameter->gradient();
 				for (int ij = 0; ij < parameter->size(); ij++)
 					params_data[ij] -= lr * params_grad[ij];
 			}

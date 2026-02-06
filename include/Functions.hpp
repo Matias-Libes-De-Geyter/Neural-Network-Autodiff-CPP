@@ -14,34 +14,44 @@ public:
 		inputs_.push_back(B);
 		outputs_.push_back(out);
 		name_ = name;
+
+		children_.push_back(A->get_fn());
+		children_.push_back(B->get_fn());
 	};
 
-	// mul will have to be improve with row-first i think
 	void backward() override {
-		if (inputs_[0]->requires_grad()) {
-			double* lgrad = inputs_[0]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
-			const double* rdata = inputs_[1]->data();
+		const size_t M = inputs_[0]->rows();
+		const size_t K = inputs_[0]->cols();
+		const size_t N = inputs_[1]->cols();
 
-			for (size_t i = 0; i < inputs_[0]->rows(); i++)
-				for (size_t j = 0; j < inputs_[0]->cols(); j++) {
-					size_t ij = i * inputs_[0]->cols() + j;
-					for (size_t k = 0; k < inputs_[1]->cols(); k++)
-						lgrad[ij] += out_grad[i * inputs_[1]->cols() + k] * rdata[j * inputs_[1]->cols() + k];
+		if (inputs_[0]->requires_grad()) {
+			Scalar* lgrad = inputs_[0]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
+			const Scalar* rdata = inputs_[1]->data();
+
+			for (size_t i = 0; i < N; i++)
+				for (size_t j = 0; j < K; j++) {
+					size_t ij = i * K + j;
+					for (size_t k = 0; k < N; k++)
+						lgrad[ij] += out_grad[i * N + k] * rdata[j * N + k];
 				}
 		}
 
+		// row-first implanted
 		if (inputs_[1]->requires_grad()) {
-			double* rgrad = inputs_[1]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
-			const double* ldata = inputs_[0]->data();
+			Scalar* rgrad = inputs_[1]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
+			const Scalar* ldata = inputs_[0]->data();
 
-			for (size_t i = 0; i < inputs_[1]->rows(); i++)
-				for (size_t j = 0; j < inputs_[1]->cols(); j++) {
-					size_t ij = i * inputs_[1]->cols() + j;
-					for (size_t k = 0; k < inputs_[0]->rows(); k++)
-						rgrad[ij] += out_grad[k * inputs_[1]->cols() + j] * ldata[k * inputs_[1]->rows() + i];
+			for (size_t k = 0; k < M; k++) {
+				const Scalar* out_col = out_grad + k * N;
+				for (size_t i = 0; i < K; i++) {
+					Scalar data = ldata[k * K + i];
+					Scalar* rgrad_col = rgrad + i * N;
+					for (size_t j = 0; j < N; j++)
+						rgrad_col[j] += out_col[j] * data;
 				}
+			}
 		}
 	};
 };
@@ -49,19 +59,25 @@ public:
 inline const TensorPtr matmul(const TensorPtr A, const TensorPtr B, std::string name) {
 	assert(A->cols() == B->rows());
 
-	const TensorPtr output = std::make_shared<Tensor>(A->rows(), B->cols(), A->requires_grad() || B->requires_grad());
+	const size_t M = A->rows();
+	const size_t K = A->cols();
+	const size_t N = B->cols();
+
+	const TensorPtr output = std::make_shared<Tensor>(M, N, A->requires_grad() || B->requires_grad());
 	output->set_fn(std::make_shared<matmul_BW>(A, B, output, name));
 
-	double* output_data = output->data();
-	const double* A_data = A->data();
-	const double* B_data = B->data();
+	Scalar* output_data = output->data();
+	const Scalar* A_data = A->data();
+	const Scalar* B_data = B->data();
 
-	// same, next step will be row first
-	for (size_t i = 0; i < output->rows(); i++) {
-		for (size_t j = 0; j < output->cols(); j++) {
-			size_t ij = i * output->cols() + j;
-			for (int k = 0; k < A->cols(); k++)
-				output_data[ij] += A_data[i * A->cols() + k] * B_data[k * B->cols() + j];
+	// I guess it's faster because the pointer is always already in the good place, no need to search k*B_cols each time we search for k*B_cols+j
+	for (size_t i = 0; i < M; i++) {
+		for (size_t k = 0; k < K; k++) {
+			Scalar data = A_data[i * K + k];
+			const Scalar* B_col = B_data + k * N;
+			Scalar* out_row = output_data + i * N;
+			for (size_t j = 0; j < N; j++)
+				out_row[j] += data * B_col[j];
 		}
 	}
 
@@ -77,20 +93,23 @@ public:
 		inputs_.push_back(B);
 		outputs_.push_back(out);
 		name_ = name;
+
+		children_.push_back(A->get_fn());
+		children_.push_back(B->get_fn());
 	};
 
 	void backward() override {
 		if (inputs_[0]->requires_grad()) {
-			double* lgrad = inputs_[0]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
+			Scalar* lgrad = inputs_[0]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
 
 			for (size_t ij = 0; ij < inputs_[0]->size(); ij++)
 				lgrad[ij] += out_grad[ij];
 		}
 
 		if (inputs_[1]->requires_grad()) {
-			double* rgrad = inputs_[1]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
+			Scalar* rgrad = inputs_[1]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
 
 			for (size_t ij = 0; ij < inputs_[1]->size(); ij++)
 				rgrad[ij] += out_grad[ij];
@@ -102,14 +121,17 @@ inline const TensorPtr matadd(const TensorPtr A, const TensorPtr B, std::string 
 	assert(A->rows() == B->rows());
 	assert(A->cols() == B->cols());
 
-	const TensorPtr output = std::make_shared<Tensor>(A->rows(), A->cols(), A->requires_grad() || B->requires_grad());
+	const size_t M = A->rows();
+	const size_t N = A->cols();
+
+	const TensorPtr output = std::make_shared<Tensor>(M, N, A->requires_grad() || B->requires_grad());
 	output->set_fn(std::make_shared<matadd_BW>(A, B, output, name));
 
-	double* output_data = output->data();
-	const double* A_data = A->data();
-	const double* B_data = B->data();
+	Scalar* output_data = output->data();
+	const Scalar* A_data = A->data();
+	const Scalar* B_data = B->data();
 
-	for (size_t ij = 0; ij < output->size(); ij++)
+	for (size_t ij = 0; ij < M*N; ij++)
 		output_data[ij] = A_data[ij] + B_data[ij];
 
 	// RVO
@@ -119,19 +141,21 @@ inline const TensorPtr matadd(const TensorPtr A, const TensorPtr B, std::string 
 
 class mul_BW : public BW_Function {
 private:
-	double value;
+	Scalar value;
 public:
-	mul_BW(const TensorPtr A, const double& b, const TensorPtr out, std::string name) {
+	mul_BW(const TensorPtr A, const Scalar& b, const TensorPtr out, std::string name) {
 		inputs_.push_back(A);
 		value = b;
 		outputs_.push_back(out);
 		name_ = name;
+
+		children_.push_back(A->get_fn());
 	};
 
 	void backward() override {
 		if (inputs_[0]->requires_grad()) {
-			double* lgrad = inputs_[0]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
+			Scalar* lgrad = inputs_[0]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
 
 			for (size_t ij = 0; ij < inputs_[0]->size(); ij++)
 				lgrad[ij] += out_grad[ij] * value;
@@ -139,12 +163,12 @@ public:
 	};
 };
 
-inline const TensorPtr mul(const TensorPtr A, const double& b, std::string name) {
+inline const TensorPtr mul(const TensorPtr A, const Scalar& b, std::string name) {
 	const TensorPtr output = std::make_shared<Tensor>(A->rows(), A->cols(), A->requires_grad());
 	output->set_fn(std::make_shared<mul_BW>(A, b, output, name));
 
-	double* output_data = output->data();
-	const double* A_data = A->data();
+	Scalar* output_data = output->data();
+	const Scalar* A_data = A->data();
 
 	for (size_t ij = 0; ij < output->size(); ij++)
 		output_data[ij] = A_data[ij] * b;
@@ -162,16 +186,18 @@ public:
 		inputs_.push_back(A);
 		outputs_.push_back(out);
 		name_ = name;
+
+		children_.push_back(A->get_fn());
 	};
 
 	void backward() override {
 		if (inputs_[0]->requires_grad()) {
-			double* grad = inputs_[0]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
-			const double* data = inputs_[0]->data();
+			Scalar* grad = inputs_[0]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
+			const Scalar* data = inputs_[0]->data();
 
 			for (size_t ij = 0; ij < inputs_[0]->size(); ij++)
-				grad[ij] += out_grad[ij] * (data[ij] >= 0 ? 1 : 0);
+				grad[ij] += (data[ij] >= 0 ? out_grad[ij] : 0);
 		}
 	};
 };
@@ -180,11 +206,11 @@ inline const TensorPtr ReLU(const TensorPtr A, std::string name) {
 	const TensorPtr output = std::make_shared<Tensor>(A->rows(), A->cols(), A->requires_grad());
 	output->set_fn(std::make_shared<ReLU_BW>(A, output, name));
 
-	double* output_data = output->data();
-	const double* A_data = A->data();
+	Scalar* output_data = output->data();
+	const Scalar* A_data = A->data();
 
 	for (size_t ij = 0; ij < output->size(); ij++)
-		output_data[ij] = std::max(A_data[ij], 0.0);
+		output_data[ij] = std::max(A_data[ij], static_cast<Scalar>(0));
 
 	// RVO
 	return output;
@@ -197,47 +223,52 @@ public:
 		inputs_.push_back(A);
 		outputs_.push_back(out);
 		name_ = name;
+
+		children_.push_back(A->get_fn());
 	};
 
 	void backward() override {
 		if (inputs_[0]->requires_grad()) {
-			double* grad = inputs_[0]->gradient();
-			const double* out_grad = outputs_[0]->gradient();
-			const double* out_data = outputs_[0]->data();
+			Scalar* grad = inputs_[0]->gradient();
+			const Scalar* out_grad = outputs_[0]->gradient();
+			const Scalar* out_data = outputs_[0]->data();
 
-			for (size_t i = 0; i < outputs_[0]->rows(); i++) {
+			const size_t M = outputs_[0]->rows();
+			const size_t N = outputs_[0]->cols();
 
-				double product = 0;
-				for (size_t k = 0; k < outputs_[0]->cols(); k++)
-					product += out_grad[i * outputs_[0]->cols() + k] * out_data[i * outputs_[0]->cols() + k];
+			for (size_t i = 0; i < M; i++) {
 
-				for (size_t j = 0; j < outputs_[0]->cols(); j++)
-					grad[i * outputs_[0]->cols() + j] += out_data[i * outputs_[0]->cols() + j] * (out_grad[i * outputs_[0]->cols() + j] - product);
+				Scalar product = 0;
+				for (size_t k = 0; k < M; k++)
+					product += out_grad[i * M + k] * out_data[i * M + k];
+
+				for (size_t j = 0; j < M; j++)
+					grad[i * M + j] += out_data[i * M + j] * (out_grad[i * M + j] - product);
 			}
 		}
 	};
 };
 
-inline const void softmax(double* output, const double* input, const int& nrows, const int& ncols) {
+inline const void softmax(Scalar* output, const Scalar* input, const int& nrows, const int& ncols) {
 
-	std::vector<double> tmp;
+	std::vector<Scalar> tmp;
 	tmp.resize(ncols);
 
 	// for each row
 	for (size_t i = 0; i < nrows; i++) {
-		const double* A_row = input + i * ncols;
-		double* output_row = output + i * ncols;
+		const Scalar* A_row = input + i * ncols;
+		Scalar* output_row = output + i * ncols;
 
 		// max
-		double max = A_row[0];
+		Scalar max = A_row[0];
 		for (size_t j = 0; j < ncols; j++) {
-			double value = A_row[j];
+			Scalar value = A_row[j];
 			if (value > max)
 				max = value;
 		}
 
 		// sum of the exps
-		double sum = 0.0;
+		Scalar sum = 0.0;
 		for (size_t j = 0; j < ncols; j++) {
 			tmp[j] = std::exp(A_row[j] - max);
 			sum += tmp[j];
@@ -251,13 +282,16 @@ inline const void softmax(double* output, const double* input, const int& nrows,
 };
 
 inline const TensorPtr softmax(const TensorPtr A, std::string name) {
-	const TensorPtr output = std::make_shared<Tensor>(A->rows(), A->cols(), A->requires_grad());
+	const size_t M = A->rows();
+	const size_t N = A->cols();
+
+	const TensorPtr output = std::make_shared<Tensor>(M, N, A->requires_grad());
 	output->set_fn(std::make_shared<softmax_BW>(A, output, name));
 
-	double* output_data = output->data();
-	const double* A_data = A->data();
+	Scalar* output_data = output->data();
+	const Scalar* A_data = A->data();
 
-	softmax(output_data, A_data, A->rows(), A->cols());
+	softmax(output_data, A_data, M, N);
 
 	// RVO
 	return output;
@@ -271,21 +305,24 @@ public:
 		inputs_.push_back(input);
 		inputs_.push_back(target);
 		outputs_.push_back(output);
+
+		children_.push_back(input->get_fn());
+		children_.push_back(target->get_fn());
 	};
 
 	void backward() override {
 		if (inputs_[0]->requires_grad()) {
-			double* lgrad = inputs_[0]->gradient();
-			const double* ldata = inputs_[0]->data();
-			const double* rdata = inputs_[1]->data();
+			Scalar* lgrad = inputs_[0]->gradient();
+			const Scalar* ldata = inputs_[0]->data();
+			const Scalar* rdata = inputs_[1]->data();
 
 			for (size_t ij = 0; ij < inputs_[0]->size(); ij++)
 				lgrad[ij] += (ldata[ij] - rdata[ij]) * inputs_[0]->size();
 		}
 		if (inputs_[1]->requires_grad()) {
-			double* rgrad = inputs_[1]->gradient();
-			const double* ldata = inputs_[0]->data();
-			const double* rdata = inputs_[1]->data();
+			Scalar* rgrad = inputs_[1]->gradient();
+			const Scalar* ldata = inputs_[0]->data();
+			const Scalar* rdata = inputs_[1]->data();
 
 			for (size_t ij = 0; ij < inputs_[0]->size(); ij++)
 				rgrad[ij] += (rdata[ij] - ldata[ij]) * 2 / inputs_[0]->size();
@@ -297,18 +334,20 @@ inline const TensorPtr MSELoss(const TensorPtr input, const TensorPtr target, st
 	assert(input->rows() == target->rows());
 	assert(input->cols() == target->cols());
 
+	const Scalar size = target->size();
+
 	const TensorPtr output = std::make_shared<Tensor>(1, 1, input->requires_grad() || target->requires_grad());
 	output->set_fn(std::make_shared<loss_BW>(input, target, output, name));
 
-	double* output_data = output->data();
-	const double* input_data = input->data();
-	const double* target_data = target->data();
+	Scalar* output_data = output->data();
+	const Scalar* input_data = input->data();
+	const Scalar* target_data = target->data();
 
-	for (size_t ij = 0; ij < target->size(); ij++)
+	for (size_t ij = 0; ij < size; ij++)
 		output_data[0] += std::pow(input_data[ij] - target_data[ij], 2);
 
-	// mean loss reduction (not sum).
-	output_data[0] /= target->size(); // if i add : 'output_data[0] /= target->size();' alors le rajouter dans le backward aussi
+	// mean loss reduction.
+	output_data[0] /= size;
 
 	// RVO
 	return output;
@@ -316,33 +355,37 @@ inline const TensorPtr MSELoss(const TensorPtr input, const TensorPtr target, st
 
 
 class CELoss_BW : public BW_Function {
+private:
+	std::vector<Scalar> temp_;
 public:
 	CELoss_BW(const TensorPtr input, const TensorPtr target_logits, const TensorPtr output, std::string name) {
 		inputs_.push_back(input);
 		inputs_.push_back(target_logits);
 		outputs_.push_back(output);
+
+		temp_.reserve(input->size());
+		children_.push_back(input->get_fn());
+		children_.push_back(target_logits->get_fn());
 	};
 
 	void backward() override {
 		if (inputs_[0]->requires_grad()) {
-			double* lgrad = inputs_[0]->gradient();
-			const double* ldata = inputs_[0]->data();
-			const double* rdata = inputs_[1]->data();
+			Scalar* lgrad = inputs_[0]->gradient();
+			const Scalar* ldata = inputs_[0]->data();
+			const Scalar* rdata = inputs_[1]->data();
 
-			// should be changed to temp buffer later on
-			double* softldata = new double[inputs_[0]->size()];
+			const size_t M = inputs_[0]->rows();
+			const size_t N = inputs_[0]->cols();
 
-			softmax(softldata, ldata, inputs_[0]->rows(), inputs_[0]->cols());
+			softmax(temp_.data(), ldata, M, N);
 
 			// basically : grad = softmax(input) - hot_one(target_logits)
-			for (size_t i = 0; i < inputs_[0]->rows(); i++)
-				for (size_t j = 0; j < inputs_[0]->cols(); j++)
-					lgrad[i * inputs_[0]->cols() + j] += (softldata[i * inputs_[0]->cols() + j] - (j == rdata[i] ? 1 : 0)) / inputs_[1]->size();
-
-			delete[] softldata;
+			for (size_t i = 0; i < M; i++)
+				for (size_t j = 0; j < N; j++)
+					lgrad[i * N + j] += (temp_[i * N + j] - (j == rdata[i] ? 1 : 0)) / M;
 		}
 		if (inputs_[1]->requires_grad())
-			print("This is the target, having a gradient here is weird.");
+			print("This is the target, having a gradient here is unusual.");
 	};
 };
 
@@ -350,36 +393,41 @@ inline const TensorPtr CrossEntropyLoss(const TensorPtr input, const TensorPtr t
 	assert(input->rows() == target_logits->rows());
 	assert(target_logits->size() == target_logits->rows());
 
+	const size_t M = input->rows();
+	const size_t N = input->cols();
+
 	const TensorPtr output = std::make_shared<Tensor>(1, 1, input->requires_grad() || target_logits->requires_grad());
 	output->set_fn(std::make_shared<CELoss_BW>(input, target_logits, output, name));
 
-	double* output_data = output->data();
-	const double* input_data = input->data();
-	const double* target_data = target_logits->data();
+	Scalar* output_data = output->data();
+	const Scalar* input_data = input->data();
+	const Scalar* target_data = target_logits->data();
 
 	// LogSoftmax : logSM(i, j) = x(i, j) - max(i) - log(sum(i)) with sum(i) the sum of exps
-	double* LogSoftmaxed_input = new double[input->size()];
-	for (size_t i = 0; i < input->rows(); i++) {
-		double max = 0;
-		double sum = 0;
-		for (size_t j = 0; j < input->cols(); j++)
-			if (max < input_data[i * input->cols() + j])
-				max = input_data[i * input->cols() + j];
+	Scalar* LogSoftmaxed_input = new Scalar[M * N];
+	for (size_t i = 0; i < M; i++) {
+		const Scalar* input_data_col = input_data + i * N;
+		Scalar* logsfinput_col = LogSoftmaxed_input + i * N;
+		Scalar max = 0, sum = 0;
 
-		for (size_t j = 0; j < input->cols(); j++)
-			sum += std::exp(input_data[i * input->cols() + j] - max);
+		for (size_t j = 0; j < N; j++)
+			if (max < input_data_col[j])
+				max = input_data_col[j];
 
-		for (size_t j = 0; j < input->cols(); j++)
-			LogSoftmaxed_input[i * input->cols() + j] = input_data[i * input->cols() + j] - max - std::log(sum); // NLLLoss of LogSoftmax
+		for (size_t j = 0; j < N; j++)
+			sum += std::exp(input_data_col[j] - max);
+
+		for (size_t j = 0; j < N; j++)
+			logsfinput_col[j] = input_data_col[j] - max - std::log(sum); // NLLLoss of LogSoftmax
 	}
 
 	// NLLLoss : L(x, class) = -x[class]
-	for (size_t i = 0; i < target_logits->size(); i++)
-		output_data[0] -= LogSoftmaxed_input[i * input->cols() + static_cast<int>(target_data[i])];
+	for (size_t i = 0; i < M; i++)
+		output_data[0] -= LogSoftmaxed_input[i * N + static_cast<int>(target_data[i])];
 	delete[] LogSoftmaxed_input;
 
 	// normalizing
-	output_data[0] /= target_logits->size();
+	output_data[0] /= M;
 
 	// RVO, no copy
 	return output;

@@ -22,10 +22,10 @@ public:
 	Linear() {};
 
 	Linear(const size_t in_features, const size_t out_features) : weight(std::make_shared<Tensor>(in_features, out_features, true)) {
-		const double k = 1.0 / std::sqrt(in_features);
-		std::uniform_real_distribution<double> random_value(-k, k);
+		const Scalar k = 1.0 / std::sqrt(in_features);
+		std::uniform_real_distribution<Scalar> random_value(-k, k);
 
-		double* weight_value = weight->data();
+		Scalar* weight_value = weight->data();
 		for (int ij = 0; ij < weight->size(); ij++)
 			weight_value[ij] = random_value(gen);
 	};

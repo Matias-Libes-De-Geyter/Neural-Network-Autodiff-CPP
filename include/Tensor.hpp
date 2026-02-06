@@ -14,8 +14,11 @@ class BW_Function;
 using TensorPtr = std::shared_ptr<Tensor>;
 using FunctionPtr = std::shared_ptr<BW_Function>;
 
+using Scalar = float;
+
 class BW_Function {
 protected:
+    std::vector<FunctionPtr> children_;
     std::vector<TensorPtr> inputs_;
     std::vector<TensorPtr> outputs_;
     std::string name_;
@@ -31,8 +34,8 @@ class Tensor {
 private:
     size_t nrows_, ncols_;
     size_t size_;
-    std::vector<double> data_;
-    std::vector<double> gradient_;
+    std::vector<Scalar> data_;
+    std::vector<Scalar> gradient_;
     FunctionPtr grad_fn_;
     bool requires_grad_;
 public:
@@ -45,7 +48,7 @@ public:
         data_.resize(size_, 0.0);
         gradient_.resize(size_, 0.0);
     }
-    Tensor(size_t row, size_t col, std::vector<double> data, std::string name, bool requires_grad) : nrows_(row), ncols_(col), size_(row* col), requires_grad_(requires_grad), data_(data) {
+    Tensor(size_t row, size_t col, std::vector<Scalar> data, std::string name, bool requires_grad) : nrows_(row), ncols_(col), size_(row* col), requires_grad_(requires_grad), data_(data) {
         assert(data.size() == size_);
 
         grad_fn_ = std::make_shared<BW_Function>(); // added
@@ -61,16 +64,16 @@ public:
     }
 
     // retrieving data
-    const size_t size() const { return size_; };
-    const size_t rows() const { return nrows_; };
-    const size_t cols() const { return ncols_; };
-    double* data() { return data_.data(); }
-    const double* data() const { return data_.data(); }
-    double* gradient() { return gradient_.data(); }
-    const double* gradient() const { return gradient_.data(); }
-    void set_fn(FunctionPtr fn) { grad_fn_ = fn; };
-    const FunctionPtr get_fn() const { return grad_fn_; };
-    const bool requires_grad() const { return requires_grad_; };
+    const size_t size() const { return size_; }
+    const size_t rows() const { return nrows_; }
+    const size_t cols() const { return ncols_; }
+    Scalar* data() { return data_.data(); }
+    const Scalar* data() const { return data_.data(); }
+    Scalar* gradient() { return gradient_.data(); }
+    const Scalar* gradient() const { return gradient_.data(); }
+    void set_fn(FunctionPtr fn) { grad_fn_ = fn; }
+    const FunctionPtr get_fn() const { return grad_fn_; }
+    const bool requires_grad() const { return requires_grad_; }
 
 
     const void backward() const {
@@ -126,11 +129,7 @@ public:
 
 // for later: here I copy the children / I should in constructors append children directly
 inline const std::vector<FunctionPtr> BW_Function::children() {
-
-    std::vector<FunctionPtr> children;
-    for (TensorPtr input : inputs_)
-        children.push_back(input->get_fn());
-    return children;
+    return children_;
 };
 
 #endif // !TENSOR
