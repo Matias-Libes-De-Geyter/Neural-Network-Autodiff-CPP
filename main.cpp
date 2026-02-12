@@ -16,13 +16,14 @@ const int label_number = 10;
 
 #include <chrono>
 
+
 int main() {
 	auto start = std::chrono::high_resolution_clock::now();
 
 	Dataset train = DataLoader(batch_number, batch_size, "train");
 
-	FFNN mmodel({ image_size, 256, 128, label_number });
-	Linear model(image_size, label_number);
+	FFNN old_model({ image_size, 256, 128, label_number });
+	Simple_Resnet model({ { image_size, 256, 128, 256, image_size }, { image_size, 256, image_size }, { image_size, 256, 128, label_number } });
 
 	SGD optim(model.parameters());
 
@@ -30,11 +31,13 @@ int main() {
 		Scalar total_loss = 0;
 		for (int batch = 0; batch < batch_number; batch++) {
 			TensorPtr logits = model.forward(train.x[batch]);
+
 			TensorPtr loss = CrossEntropyLoss(logits, train.y[batch], "celoss");
 
 			total_loss += loss->data()[0];
 
 			optim.zero_grad();
+
 			loss->backward();
 
 			optim.step(0.05);
@@ -44,6 +47,6 @@ int main() {
 	auto end = std::chrono::high_resolution_clock::now();
 
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-	print(duration/1000.f);
+	print(duration / 1000.f);
 
 }

@@ -110,11 +110,9 @@ public:
 
             topo_ordered_nodes.push_back(current_node);
 
-            for (FunctionPtr child : current_node->children()) {
-                if (--nb_parents[child] == 0) {
+            for (FunctionPtr child : current_node->children())
+                if (--nb_parents[child] == 0)
                     stack.push_back(child);
-                }
-            }
         }
 
         /*for (FunctionPtr node : topo_ordered_nodes) {
@@ -122,8 +120,10 @@ public:
         }*/
 
         // now that we found the correct topological reverse order of the graph, we call all the backward functions in the correct order
-        for (FunctionPtr node : topo_ordered_nodes)
+        for (FunctionPtr node : topo_ordered_nodes) {
+            //std::cout << node->getname();
             node->backward();
+        }
     }
 };
 

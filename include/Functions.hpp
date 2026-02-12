@@ -25,11 +25,12 @@ public:
 		const size_t N = inputs_[1]->cols();
 
 		if (inputs_[0]->requires_grad()) {
+
 			Scalar* lgrad = inputs_[0]->gradient();
 			const Scalar* out_grad = outputs_[0]->gradient();
 			const Scalar* rdata = inputs_[1]->data();
 
-			for (size_t i = 0; i < N; i++)
+			for (size_t i = 0; i < M; i++)
 				for (size_t j = 0; j < K; j++) {
 					size_t ij = i * K + j;
 					for (size_t k = 0; k < N; k++)
@@ -53,6 +54,7 @@ public:
 				}
 			}
 		}
+
 	};
 };
 

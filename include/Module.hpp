@@ -37,36 +37,74 @@ public:
 	const std::vector<TensorPtr> parameters() override { return { weight }; };
 };
 
-// disgusting, to improve with one hidden tensor and more dynamic approach
+// disgusting, to improve
 class FFNN : public Module {
 private:
 	std::vector<Linear> blocks;
 	std::vector<int> dims_;
+	int length_;
 
-	TensorPtr h_1;
-	TensorPtr h_2;
-	TensorPtr x_1;
-	TensorPtr x_2;
-	TensorPtr x_3;
+	TensorPtr next_hidden;
+	TensorPtr next;
 public:
-	FFNN(std::vector<int> dims) : dims_(dims) {
+	FFNN(std::vector<int> dims) : dims_(dims), length_(dims.size()) {
 		for (int i = 0; i < dims_.size() - 1; i++)
 			blocks.push_back(Linear(dims_[i], dims_[i + 1]));
 	};
 	const TensorPtr forward(const TensorPtr input) override {
+		
+		next = input;
+		for (int i = 0; i < length_ - 2; i++) {
+			next_hidden = blocks[i].forward(next);
+			next = ReLU(next_hidden, "relu i");
+		}
+		next_hidden = blocks[length_ - 2].forward(next);
 
-		x_1 = blocks[0].forward(input);
-		h_1 = ReLU(x_1, "nom 1");
-		x_2 = blocks[1].forward(h_1);
-		h_2 = ReLU(x_2, "nom 2");
-		x_3 = blocks[2].forward(h_2);
-
-		return x_3; // logits
+		return next_hidden; // logits
 	};
 	const std::vector<TensorPtr> parameters() override {
 		std::vector<TensorPtr> params;
 		for (int i = 0; i < dims_.size() - 1; i++)
 			params.push_back(blocks[i].parameters()[0]);
+
+		return params;
+	};
+};
+
+class Simple_Resnet : public Module {
+private:
+	std::vector<FFNN> blocks;
+	std::vector<std::vector<int>> dims_;
+	int length_;
+
+	TensorPtr next_hidden;
+	TensorPtr next_hidden_relu;
+	TensorPtr next;
+public:
+	Simple_Resnet(std::vector<std::vector<int>> dims) : dims_(dims), length_(dims.size()) {
+
+		for (int i = 0; i < length_; i++)
+			blocks.push_back(FFNN(dims_[i]));
+	};
+	const TensorPtr forward(const TensorPtr input) override {
+
+		next = input;
+		for (int i = 0; i < length_ - 1; i++) {
+			next_hidden = blocks[i].forward(next);
+			next_hidden_relu = ReLU(next_hidden, "relu");
+			next = matadd(next, next_hidden_relu, "matadd");
+		}
+		next_hidden = blocks[length_ - 1].forward(next);
+
+		return next_hidden; // logits
+	};
+	const std::vector<TensorPtr> parameters() override {
+		std::vector<TensorPtr> params = blocks[0].parameters();
+
+		for (int i = 1; i < length_; i++) {
+			std::vector<TensorPtr> _params = blocks[i].parameters();
+			params.insert(params.end(), _params.begin(), _params.end());
+		}
 
 		return params;
 	};
