@@ -16,14 +16,36 @@ const int label_number = 10;
 
 #include <chrono>
 
-
 int main() {
+	std::vector<Scalar> A_data(210);
+	std::vector<Scalar> B_data(210);
+	std::vector<Scalar> C_data(210);
+
+	for (int i = 0; i < 210; ++i) {
+		A_data[i] = static_cast<Scalar>(i + 1);
+		B_data[i] = static_cast<Scalar>(-i);
+		C_data[i] = static_cast<Scalar>(-i);
+	}
+
+	// Let's not focus on broadcastable dimension but identical dimension
+	TensorPtr A = std::make_shared<Tensor>(std::vector<size_t>{7, 5, 2, 3}, A_data, "A", true);
+	TensorPtr B = std::make_shared<Tensor>(std::vector<size_t>{7, 5, 2, 3}, B_data, "B", true);
+	TensorPtr C = std::make_shared<Tensor>(std::vector<size_t>{7, 5, 3, 2}, C_data, "C", true);
+
+	TensorPtr X = matadd(A, B, "X");
+	TensorPtr Y = matmul(A, C, "Y");
+	print(*X);
+	print(*Y);
+
+
+}
+
+/*int second_main() {
 	auto start = std::chrono::high_resolution_clock::now();
 
 	Dataset train = DataLoader(batch_number, batch_size, "train");
 
-	FFNN old_model({ image_size, 256, 128, label_number });
-	Simple_Resnet model({ { image_size, 256, 128, 256, image_size }, { image_size, 256, image_size }, { image_size, 256, 128, label_number } });
+	FFNN model({ image_size, 256, 128, label_number });
 
 	SGD optim(model.parameters());
 
@@ -49,4 +71,4 @@ int main() {
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 	print(duration / 1000.f);
 
-}
+}*/

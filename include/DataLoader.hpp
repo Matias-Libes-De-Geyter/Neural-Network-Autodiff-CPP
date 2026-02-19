@@ -4,6 +4,8 @@
 #ifndef DATASET
 #define DATASET
 
+#pragma GCC diagnostic ignored "-Wnarrowing"
+
 // ======== DATASET LOADER ======== //
 inline int reverseInt(int i) { // to little-endian
 	unsigned char c1, c2, c3, c4;
@@ -57,7 +59,7 @@ struct Dataset {
 	std::vector<TensorPtr> x;
 	std::vector<TensorPtr> y;
 };
-inline Dataset DataLoader(const int& batch_number, const int& batch_size, const std::string& dataset_type) {
+inline Dataset DataLoader(const size_t& batch_number, const size_t& batch_size, const std::string& dataset_type) {
 
 	std::vector<Scalar> images;
 	std::vector<Scalar> labels;
@@ -83,12 +85,12 @@ inline Dataset DataLoader(const int& batch_number, const int& batch_size, const 
 	data.x.reserve(batch_number);
 	data.y.reserve(batch_number);
 
-	for (int n = 0; n < batch_number; n++) {
+	for (size_t n = 0; n < batch_number; n++) {
 		std::vector<Scalar> batch_x(&images[batch_size * nrows * ncols * n], &images[batch_size * nrows * ncols * (n + 1)]);
 		std::vector<Scalar> batch_y(&labels[batch_size * n], &labels[batch_size * (n + 1)]);
 		
-		TensorPtr X = std::make_shared<Tensor>(batch_size, nrows * ncols, batch_x, "IMG", false);
-		TensorPtr Y = std::make_shared<Tensor>(batch_size, 1, batch_y, "LBL", false);
+		TensorPtr X = std::make_shared<Tensor>(std::vector<size_t>{ batch_size, nrows * ncols }, batch_x, "IMG", false);
+		TensorPtr Y = std::make_shared<Tensor>(std::vector<size_t>{ batch_size, 1 }, batch_y, "LBL", false);
 
 		data.x.emplace_back(X);
 		data.y.emplace_back(Y);

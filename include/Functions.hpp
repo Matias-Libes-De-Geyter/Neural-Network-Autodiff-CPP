@@ -30,12 +30,15 @@ public:
 			const Scalar* out_grad = outputs_[0]->gradient();
 			const Scalar* rdata = inputs_[1]->data();
 
-			for (size_t i = 0; i < M; i++)
-				for (size_t j = 0; j < K; j++) {
-					size_t ij = i * K + j;
-					for (size_t k = 0; k < N; k++)
-						lgrad[ij] += out_grad[i * N + k] * rdata[j * N + k];
-				}
+			const size_t C = outputs_[0]->others();
+			for (size_t I = 0; I < C; I++) {
+				for (size_t i = 0; i < M; i++)
+					for (size_t j = 0; j < K; j++) {
+						size_t ij = I*K*M + i * K + j;
+						for (size_t k = 0; k < N; k++)
+							lgrad[ij] += out_grad[I*N*M + i * N + k] * rdata[I*N*K + j * N + k];
+					}
+			}
 		}
 
 		// row-first implanted
@@ -44,42 +47,51 @@ public:
 			const Scalar* out_grad = outputs_[0]->gradient();
 			const Scalar* ldata = inputs_[0]->data();
 
-			for (size_t k = 0; k < M; k++) {
-				const Scalar* out_col = out_grad + k * N;
-				for (size_t i = 0; i < K; i++) {
-					Scalar data = ldata[k * K + i];
-					Scalar* rgrad_col = rgrad + i * N;
-					for (size_t j = 0; j < N; j++)
-						rgrad_col[j] += out_col[j] * data;
+			const size_t C = outputs_[0]->others();
+			for (size_t I = 0; I < C; I++) {
+				for (size_t k = 0; k < M; k++) {
+					const Scalar* out_col = out_grad + k * N + I*M*N;
+					for (size_t i = 0; i < K; i++) {
+						Scalar data = ldata[I * K * M + k * K + i];
+						Scalar* rgrad_col = rgrad + i * N + I * N * K;
+						for (size_t j = 0; j < N; j++)
+							rgrad_col[j] += out_col[j] * data;
+					}
 				}
 			}
 		}
-
 	};
 };
 
 inline const TensorPtr matmul(const TensorPtr A, const TensorPtr B, std::string name) {
+	assert(A->other_dims() == B->other_dims());
 	assert(A->cols() == B->rows());
 
 	const size_t M = A->rows();
 	const size_t K = A->cols();
 	const size_t N = B->cols();
 
-	const TensorPtr output = std::make_shared<Tensor>(M, N, A->requires_grad() || B->requires_grad());
+	std::vector<size_t> out_dims = A->other_dims();
+	out_dims.push_back(M);
+	out_dims.push_back(N);
+
+	const TensorPtr output = std::make_shared<Tensor>(out_dims, A->requires_grad() || B->requires_grad());
 	output->set_fn(std::make_shared<matmul_BW>(A, B, output, name));
 
 	Scalar* output_data = output->data();
 	const Scalar* A_data = A->data();
 	const Scalar* B_data = B->data();
 
-	// I guess it's faster because the pointer is always already in the good place, no need to search k*B_cols each time we search for k*B_cols+j
-	for (size_t i = 0; i < M; i++) {
-		for (size_t k = 0; k < K; k++) {
-			Scalar data = A_data[i * K + k];
-			const Scalar* B_col = B_data + k * N;
-			Scalar* out_row = output_data + i * N;
-			for (size_t j = 0; j < N; j++)
-				out_row[j] += data * B_col[j];
+	const size_t C = output->others();
+	for (size_t I = 0; I < C; I++) {
+		for (size_t i = 0; i < M; i++) {
+			for (size_t k = 0; k < K; k++) {
+				Scalar data = A_data[I * K * M + i * K + k];
+				const Scalar* B_col = B_data + k * N + I * N * K;
+				Scalar* out_row = output_data + i * N + I * N * M;
+				for (size_t j = 0; j < N; j++)
+					out_row[j] += data * B_col[j];
+			}
 		}
 	}
 
@@ -120,20 +132,17 @@ public:
 };
 
 inline const TensorPtr matadd(const TensorPtr A, const TensorPtr B, std::string name) {
-	assert(A->rows() == B->rows());
-	assert(A->cols() == B->cols());
+	assert(B->dims() == A->dims());
 
-	const size_t M = A->rows();
-	const size_t N = A->cols();
 
-	const TensorPtr output = std::make_shared<Tensor>(M, N, A->requires_grad() || B->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(A->dims(), A->requires_grad() || B->requires_grad());
 	output->set_fn(std::make_shared<matadd_BW>(A, B, output, name));
 
 	Scalar* output_data = output->data();
 	const Scalar* A_data = A->data();
 	const Scalar* B_data = B->data();
 
-	for (size_t ij = 0; ij < M*N; ij++)
+	for (size_t ij = 0; ij < A->size(); ij++)
 		output_data[ij] = A_data[ij] + B_data[ij];
 
 	// RVO
@@ -166,7 +175,7 @@ public:
 };
 
 inline const TensorPtr mul(const TensorPtr A, const Scalar& b, std::string name) {
-	const TensorPtr output = std::make_shared<Tensor>(A->rows(), A->cols(), A->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ A->rows(), A->cols() }, A->requires_grad());
 	output->set_fn(std::make_shared<mul_BW>(A, b, output, name));
 
 	Scalar* output_data = output->data();
@@ -205,7 +214,7 @@ public:
 };
 
 inline const TensorPtr ReLU(const TensorPtr A, std::string name) {
-	const TensorPtr output = std::make_shared<Tensor>(A->rows(), A->cols(), A->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ A->rows(), A->cols() }, A->requires_grad());
 	output->set_fn(std::make_shared<ReLU_BW>(A, output, name));
 
 	Scalar* output_data = output->data();
@@ -287,7 +296,7 @@ inline const TensorPtr softmax(const TensorPtr A, std::string name) {
 	const size_t M = A->rows();
 	const size_t N = A->cols();
 
-	const TensorPtr output = std::make_shared<Tensor>(M, N, A->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ M, N }, A->requires_grad());
 	output->set_fn(std::make_shared<softmax_BW>(A, output, name));
 
 	Scalar* output_data = output->data();
@@ -338,7 +347,7 @@ inline const TensorPtr MSELoss(const TensorPtr input, const TensorPtr target, st
 
 	const Scalar size = target->size();
 
-	const TensorPtr output = std::make_shared<Tensor>(1, 1, input->requires_grad() || target->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ 1 }, input->requires_grad() || target->requires_grad());
 	output->set_fn(std::make_shared<loss_BW>(input, target, output, name));
 
 	Scalar* output_data = output->data();
@@ -398,7 +407,7 @@ inline const TensorPtr CrossEntropyLoss(const TensorPtr input, const TensorPtr t
 	const size_t M = input->rows();
 	const size_t N = input->cols();
 
-	const TensorPtr output = std::make_shared<Tensor>(1, 1, input->requires_grad() || target_logits->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ 1 }, input->requires_grad() || target_logits->requires_grad());
 	output->set_fn(std::make_shared<CELoss_BW>(input, target_logits, output, name));
 
 	Scalar* output_data = output->data();
@@ -436,6 +445,6 @@ inline const TensorPtr CrossEntropyLoss(const TensorPtr input, const TensorPtr t
 };
 
 
-// To add : nn.CrossEntropyLoss (avec NLLoss ?), nn.Dropout, nn.Embedding, nn.LayerNorm, nn.Conv2D, nn.MaxPool2D
+// To add : nn.Dropout, nn.Embedding, nn.LayerNorm, nn.Conv2D, nn.MaxPool2D
 
 #endif // !FUNCTIONS

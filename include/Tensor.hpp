@@ -32,29 +32,38 @@ public:
 
 class Tensor {
 private:
-    size_t nrows_, ncols_;
+    std::vector<size_t> dims_;
     size_t size_;
+
     std::vector<Scalar> data_;
     std::vector<Scalar> gradient_;
+
     FunctionPtr grad_fn_;
     bool requires_grad_;
+
 public:
     // constructor
     Tensor() {}
-    Tensor(size_t row, size_t col, bool requires_grad) : nrows_(row), ncols_(col), size_(row* col), requires_grad_(requires_grad) {
-        grad_fn_ = std::make_shared<BW_Function>(); // added
-        grad_fn_->setname("no name"); // added
-        size_ = nrows_ * ncols_;
+    Tensor(std::vector<size_t> dims, bool requires_grad) : dims_(dims), requires_grad_(requires_grad) {
+        grad_fn_ = std::make_shared<BW_Function>();
+        grad_fn_->setname("no name");
+
+        size_ = 1;
+        for (size_t dim : dims) size_ *= dim;
+
         data_.resize(size_, 0.0);
         gradient_.resize(size_, 0.0);
     }
-    Tensor(size_t row, size_t col, std::vector<Scalar> data, std::string name, bool requires_grad) : nrows_(row), ncols_(col), size_(row* col), requires_grad_(requires_grad), data_(data) {
+    Tensor(std::vector<size_t> dims, std::vector<Scalar> data, std::string name, bool requires_grad) : dims_(dims), requires_grad_(requires_grad), data_(data) {
+        
+        size_ = 1;
+        for (size_t dim : dims) size_ *= dim;
         assert(data.size() == size_);
 
-        grad_fn_ = std::make_shared<BW_Function>(); // added
-        grad_fn_->setname(name); // added
+        grad_fn_ = std::make_shared<BW_Function>();
+        grad_fn_->setname(name);
         gradient_.resize(size_, 0.0);
-    } // zero_grad() could take care of grad, but initialized at 0 for the input which is not within any model->zero_grad() scope.
+    }
 
     void zero_grad() {
         std::fill(gradient_.begin(), gradient_.end(), 0.0);
@@ -65,8 +74,26 @@ public:
 
     // retrieving data
     const size_t size() const { return size_; }
-    const size_t rows() const { return nrows_; }
-    const size_t cols() const { return ncols_; }
+
+    const size_t rows() const {
+        return (dims_.size() == 1) ? 1 : dims_[dims_.size() - 2];
+    }
+    const size_t cols() const {
+        return dims_[dims_.size() - 1];
+    }
+    const size_t others() const {
+        if (dims_.size() <= 2)
+            return 1;
+        else
+            return size_ / dims_[dims_.size() - 1] / dims_[dims_.size() - 2];
+    }
+    const std::vector<size_t> dims() const {
+        return dims_;
+    }
+    const std::vector<size_t> other_dims() const {
+        return std::vector<size_t>(dims_.begin(), dims_.begin() + dims_.size() - 2);
+    }
+
     Scalar* data() { return data_.data(); }
     const Scalar* data() const { return data_.data(); }
     Scalar* gradient() { return gradient_.data(); }

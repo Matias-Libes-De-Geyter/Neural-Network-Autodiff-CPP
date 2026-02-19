@@ -21,7 +21,7 @@ private:
 public:
 	Linear() {};
 
-	Linear(const size_t in_features, const size_t out_features) : weight(std::make_shared<Tensor>(in_features, out_features, true)) {
+	Linear(const size_t in_features, const size_t out_features) : weight(std::make_shared<Tensor>(std::vector<size_t>({ in_features, out_features }), true)) {
 		const Scalar k = 1.0 / std::sqrt(in_features);
 		std::uniform_real_distribution<Scalar> random_value(-k, k);
 
