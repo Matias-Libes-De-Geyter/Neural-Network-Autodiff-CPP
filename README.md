@@ -19,3 +19,6 @@ Nonetheless I have to quickly improve the parameters() functions, along with the
 # Commit #1 from 19-02-2026 | From Matrices to Tensors
 I replaces the row/col sizes from Tensor to std::vector\<size_t\> for real handling (useful for CNNs later on). \\
 Only implemented matmul, matadd and linear functions for now. Next will be the other functions, including CELoss and MSELoss.
+
+# Commit #1 from 21-02-2026 | Fully Tensorised the code
+Replaced row/col usage by dims, for all implemented functions. Normal training for main works fine

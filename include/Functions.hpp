@@ -175,7 +175,7 @@ public:
 };
 
 inline const TensorPtr mul(const TensorPtr A, const Scalar& b, std::string name) {
-	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ A->rows(), A->cols() }, A->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(A->dims(), A->requires_grad());
 	output->set_fn(std::make_shared<mul_BW>(A, b, output, name));
 
 	Scalar* output_data = output->data();
@@ -214,7 +214,7 @@ public:
 };
 
 inline const TensorPtr ReLU(const TensorPtr A, std::string name) {
-	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ A->rows(), A->cols() }, A->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(A->dims(), A->requires_grad());
 	output->set_fn(std::make_shared<ReLU_BW>(A, output, name));
 
 	Scalar* output_data = output->data();
@@ -247,62 +247,68 @@ public:
 			const size_t M = outputs_[0]->rows();
 			const size_t N = outputs_[0]->cols();
 
-			for (size_t i = 0; i < M; i++) {
+			const size_t C = outputs_[0]->others();
+			for (size_t I = 0; I < C; I++) {
+				for (size_t i = 0; i < M; i++) {
 
-				Scalar product = 0;
-				for (size_t k = 0; k < M; k++)
-					product += out_grad[i * M + k] * out_data[i * M + k];
+					Scalar product = 0;
+					for (size_t k = 0; k < N; k++)
+						product += out_grad[I * M * N + i * N + k] * out_data[I * M * N + i * N + k];
 
-				for (size_t j = 0; j < M; j++)
-					grad[i * M + j] += out_data[i * M + j] * (out_grad[i * M + j] - product);
+					for (size_t j = 0; j < N; j++)
+						grad[I * M * N + i * N + j] += out_data[I * M * N + i * N + j] * (out_grad[I * M * N + i * N + j] - product);
+				}
 			}
 		}
 	};
 };
 
-inline const void softmax(Scalar* output, const Scalar* input, const int& nrows, const int& ncols) {
+inline const void softmax(Scalar* output, const Scalar* input, const size_t& n, const size_t& nrows, const size_t& ncols) {
 
 	std::vector<Scalar> tmp;
 	tmp.resize(ncols);
 
 	// for each row
-	for (size_t i = 0; i < nrows; i++) {
-		const Scalar* A_row = input + i * ncols;
-		Scalar* output_row = output + i * ncols;
+	for (size_t I = 0; I < n; I++) {
+		for (size_t i = 0; i < nrows; i++) {
+			const Scalar* A_row = input + i * ncols + I * ncols * nrows;
+			Scalar* output_row = output + i * ncols + I * ncols * nrows;
 
-		// max
-		Scalar max = A_row[0];
-		for (size_t j = 0; j < ncols; j++) {
-			Scalar value = A_row[j];
-			if (value > max)
-				max = value;
+			// max
+			Scalar max = A_row[0];
+			for (size_t j = 0; j < ncols; j++) {
+				Scalar value = A_row[j];
+				if (value > max)
+					max = value;
+			}
+
+			// sum of the exps
+			Scalar sum = 0.0;
+			for (size_t j = 0; j < ncols; j++) {
+				tmp[j] = std::exp(A_row[j] - max);
+				sum += tmp[j];
+			}
+
+			// value exp(x_i)/sum
+			for (size_t j = 0; j < ncols; j++)
+				output_row[j] = tmp[j] / sum;
 		}
-
-		// sum of the exps
-		Scalar sum = 0.0;
-		for (size_t j = 0; j < ncols; j++) {
-			tmp[j] = std::exp(A_row[j] - max);
-			sum += tmp[j];
-		}
-
-		// value exp(x_i)/sum
-		for (size_t j = 0; j < ncols; j++)
-			output_row[j] = tmp[j] / sum;
 	}
 
 };
 
 inline const TensorPtr softmax(const TensorPtr A, std::string name) {
+	const size_t T = A->others();
 	const size_t M = A->rows();
 	const size_t N = A->cols();
 
-	const TensorPtr output = std::make_shared<Tensor>(std::vector<size_t>{ M, N }, A->requires_grad());
+	const TensorPtr output = std::make_shared<Tensor>(A->dims(), A->requires_grad());
 	output->set_fn(std::make_shared<softmax_BW>(A, output, name));
 
 	Scalar* output_data = output->data();
 	const Scalar* A_data = A->data();
 
-	softmax(output_data, A_data, M, N);
+	softmax(output_data, A_data, T, M, N);
 
 	// RVO
 	return output;
@@ -342,8 +348,7 @@ public:
 };
 
 inline const TensorPtr MSELoss(const TensorPtr input, const TensorPtr target, std::string name) {
-	assert(input->rows() == target->rows());
-	assert(input->cols() == target->cols());
+	assert(input->dims() == target->dims());
 
 	const Scalar size = target->size();
 
@@ -385,15 +390,17 @@ public:
 			const Scalar* ldata = inputs_[0]->data();
 			const Scalar* rdata = inputs_[1]->data();
 
+			const size_t C = inputs_[0]->others();
 			const size_t M = inputs_[0]->rows();
 			const size_t N = inputs_[0]->cols();
 
-			softmax(temp_.data(), ldata, M, N);
+			softmax(temp_.data(), ldata, C, M, N);
 
 			// basically : grad = softmax(input) - hot_one(target_logits)
-			for (size_t i = 0; i < M; i++)
-				for (size_t j = 0; j < N; j++)
-					lgrad[i * N + j] += (temp_[i * N + j] - (j == rdata[i] ? 1 : 0)) / M;
+			for (size_t I = 0; I < C; I++)
+				for (size_t i = 0; i < M; i++)
+					for (size_t j = 0; j < N; j++)
+						lgrad[I * N * M + i * N + j] += (temp_[I * N * M + i * N + j] - (j == rdata[I * M + i] ? 1 : 0)) / M;
 		}
 		if (inputs_[1]->requires_grad())
 			print("This is the target, having a gradient here is unusual.");
@@ -401,9 +408,11 @@ public:
 };
 
 inline const TensorPtr CrossEntropyLoss(const TensorPtr input, const TensorPtr target_logits, std::string name) {
+	assert(input->other_dims() == target_logits->other_dims());
 	assert(input->rows() == target_logits->rows());
-	assert(target_logits->size() == target_logits->rows());
+	assert(target_logits->cols() == 1);
 
+	const size_t T = input->others();
 	const size_t M = input->rows();
 	const size_t N = input->cols();
 
@@ -415,30 +424,33 @@ inline const TensorPtr CrossEntropyLoss(const TensorPtr input, const TensorPtr t
 	const Scalar* target_data = target_logits->data();
 
 	// LogSoftmax : logSM(i, j) = x(i, j) - max(i) - log(sum(i)) with sum(i) the sum of exps
-	Scalar* LogSoftmaxed_input = new Scalar[M * N];
-	for (size_t i = 0; i < M; i++) {
-		const Scalar* input_data_col = input_data + i * N;
-		Scalar* logsfinput_col = LogSoftmaxed_input + i * N;
-		Scalar max = 0, sum = 0;
+	Scalar* LogSoftmaxed_input = new Scalar[T * M * N];
+	for (size_t I = 0; I < T; I++) {
+		for (size_t i = 0; i < M; i++) {
+			const Scalar* input_data_col = input_data + i * N + I * N * M;
+			Scalar* logsfinput_col = LogSoftmaxed_input + i * N + I * N * M;
+			Scalar max = 0, sum = 0;
 
-		for (size_t j = 0; j < N; j++)
-			if (max < input_data_col[j])
-				max = input_data_col[j];
+			for (size_t j = 0; j < N; j++)
+				if (max < input_data_col[j])
+					max = input_data_col[j];
 
-		for (size_t j = 0; j < N; j++)
-			sum += std::exp(input_data_col[j] - max);
+			for (size_t j = 0; j < N; j++)
+				sum += std::exp(input_data_col[j] - max);
 
-		for (size_t j = 0; j < N; j++)
-			logsfinput_col[j] = input_data_col[j] - max - std::log(sum); // NLLLoss of LogSoftmax
+			for (size_t j = 0; j < N; j++)
+				logsfinput_col[j] = input_data_col[j] - max - std::log(sum); // NLLLoss of LogSoftmax
+		}
 	}
 
 	// NLLLoss : L(x, class) = -x[class]
-	for (size_t i = 0; i < M; i++)
-		output_data[0] -= LogSoftmaxed_input[i * N + static_cast<int>(target_data[i])];
+	for (size_t I = 0; I < T; I++)
+		for (size_t i = 0; i < M; i++)
+			output_data[0] -= LogSoftmaxed_input[I * N * M + i * N + static_cast<int>(target_data[i])];
 	delete[] LogSoftmaxed_input;
 
 	// normalizing
-	output_data[0] /= M;
+	output_data[0] /= M*T;
 
 	// RVO, no copy
 	return output;
